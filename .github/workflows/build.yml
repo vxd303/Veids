@@ -52,7 +52,7 @@ jobs:
           # RANDOM macro
           sed -i 's/cryptoutils->get_uint8_t() % 100 < \(.*\)/((uint32_t)cryptoutils->get_uint8_t() % 100u) < (uint32_t)\1/' include/MBAObfuscation.h || true
           # ensure compat macros exist in HikariStringEncryption.cpp
-          F=src/HikariStringEncryption.cpp
+          F=Obfuscation/src/HikariStringEncryption.cpp
           grep -q 'STRREF_STARTS_WITH' "$F" || \
             sed -i '1i #include "llvm/Config/llvm-config.h"\n#if LLVM_VERSION_MAJOR >= 18\n#define STRREF_STARTS_WITH(S,P) (S.starts_with(P))\n#define STRREF_ENDS_WITH(S,P) (S.ends_with(P))\n#else\n#define STRREF_STARTS_WITH(S,P) (S.startswith(P))\n#define STRREF_ENDS_WITH(S,P) (S.endswith(P))\n#endif\n' "$F"
           # Convert any lingering .starts_with/.ends_with usages to macros (optional sweep)
