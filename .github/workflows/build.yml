@@ -38,7 +38,7 @@ jobs:
             | xargs -0 sed -i 's/\.starts_with(/.startswith(/g'
 
           find "$D" -type f \( -name '*.cpp' -o -name '*.h' \) -print0 \
-            | xargs -0 sed -i 's/\.startswith("function")/Name.starts_with("function")/'
+            | xargs -0 sed -i 's/\.startswith("function")/starts_with("function")/'
 
           mapfile -t OPT_FILES < <(grep -RIl --include='*.{cpp,h}' -e 'std::optional' -e 'std::nullopt' "$D" || true)
           for f in "${OPT_FILES[@]}"; do
