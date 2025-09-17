@@ -95,6 +95,18 @@ jobs:
           set -euxo pipefail
           D="Obfuscation"
           [ -f "$D/src/IndirectBranch.cpp" ] && sed -i 's/->getIterator()//g' "$D/src/IndirectBranch.cpp" || true
+      - name: Vá lỗi BogusControlFlow cho LLVM 14
+        run: |
+          set -euxo pipefail
+          D="Obfuscation"
+          F="$D/src/BogusControlFlow.cpp"
+
+          if [ -f "$F" ]; then
+            # Sử dụng perl để thay thế toàn bộ dòng lỗi
+            perl -i -0777 -pe '
+              s/new ICmpInst\(\s*I,\s*CmpInst::ICMP_EQ,\s*LHS,\s*RHS,\s*"BCFPlaceHolderPred"\s*\);/llvm::IRBuilder<>(I)->CreateICmpEQ(LHS, RHS, "BCFPlaceHolderPred");/g;
+            ' "$F"
+          fi
       
       - name: Configure and build
         run: |
