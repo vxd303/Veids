@@ -23,6 +23,10 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y clang-14 lld-14 libclang-14-dev liblld-14-dev cmake
 
+      - name: Patch source code for LLVM 14 compatibility
+        run: |
+          sed -i 's/\.starts_with/\.startswith/g' Obfuscation/src/Utils.cpp
+
       - name: Configure and build
         run: |
           mkdir build
