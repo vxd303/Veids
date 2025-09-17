@@ -109,17 +109,9 @@ void VMFlattenPass::gen_inst(std::vector<VMInst *> *all_inst, std::map<Node *, u
 void VMFlattenPass::dump_inst(std::vector<VMInst *> *all_inst){
     /* unsigned int x = 0; */
     for (std::vector<VMInst *>::iterator i = all_inst->begin(); i != all_inst->end(); i++){
-        //printf("\033[1;32m0x%02x: \033[0m", x++);
         VMInst *c = *i;
-        if (c->type == RUN_BLOCK){
-            //printf("\033[1;32mRUN_BLOCK 0x%02x\033[0m\n", c->op1);
-        }
-        if (c->type == JMP_BORING){
-            //printf("\033[1;32mJMP_BORING 0x%02x\033[0m\n", c->op1);
-        }
-        if (c->type == JMP_SELECT){
-            //printf("\033[1;32mJMP_SELECT 0x%02x 0x%02x\033[0m\n", c->op1, c->op2);
-        }
+        (void)c;
+        // in ra nếu muốn
     }
 }
 
@@ -150,7 +142,6 @@ void VMFlattenPass::DoFlatten(Function *f, int seed){
         origBB.insert(origBB.begin(), splited);
     }
     std::vector<Node *> all_node;
-    // unsigned int val=0;
     std::vector<unsigned int> rand_list;
     for (std::vector<BasicBlock *>::iterator i = origBB.begin(); i != origBB.end(); i++){
         unsigned int num = getUniqueNumber(&rand_list);
@@ -174,7 +165,6 @@ void VMFlattenPass::DoFlatten(Function *f, int seed){
         }else{
             continue;
         }
-        // for(std::vector<Node*>::iterator j=all_node.begin();j!=all_node.end();j++)
     }
     Node *start = findBBNode(firstbb, &all_node);
     Node *fake = newNode(0x7FFFFFFF);
@@ -234,26 +224,7 @@ void VMFlattenPass::DoFlatten(Function *f, int seed){
     switch1->addCase(ConstantInt::get(Type::getInt32Ty(f->getContext()), JMP_SELECT), jmp_select);
 
     // create run_block's basicblock
-    // the first choice
     IRB.SetInsertPoint(run_block);
-    /*
-        std::vector<Constant *> bb_addrs;
-        for(std::vector<BasicBlock *>::iterator b=origBB.begin();b!=origBB.end();b++){
-            BasicBlock *block=*b;
-            bb_addrs.push_back(BlockAddress::get(block));
-        }
-        ArrayType *AT_=ArrayType::get(Type::getInt8PtrTy(f->getContext()),bb_addrs.size());
-        Constant *addr_array=ConstantArray::get(AT_,ArrayRef<Constant*>(bb_addrs));
-        GlobalVariable *address_arr_var=new GlobalVariable(*(f->getParent()),AT_,false,GlobalValue::LinkageTypes::PrivateLinkage,addr_array,"address_table");
-        Value *load=IRB.CreateLoad(IRB.CreateGEP(address_arr_var,{zero,op1}),"address");
-        IndirectBrInst *indirBr=IndirectBrInst::Create(load,bb_addrs.size(),run_block);
-        for(std::vector<BasicBlock *>::iterator b=origBB.begin();b!=origBB.end();b++)
-{
-            BasicBlock *block=*b;
-            indirBr->addDestination(block);
-        }
-    */
-    // the seconde choice
     SwitchInst *switch2 = IRB.CreateSwitch(op1, defaultCase, 0);
     for (std::vector<BasicBlock *>::iterator b = origBB.begin(); b != origBB.end(); b++){
         BasicBlock *block = *b;
@@ -315,18 +286,22 @@ void VMFlattenPass::DoFlatten(Function *f, int seed){
             }
         }
 
+        // ==== FIX(LLVM14+): iterator -> Instruction* AllocaPoint ====
         BasicBlock &entryBB = f->getEntryBlock();
-        BasicBlock::iterator insertPt = --entryBB.end();
+        Instruction *AllocaIP = nullptr;
+        {
+            auto FI = entryBB.getFirstInsertionPt();   // sau các Alloca/PHI đầu khối
+            AllocaIP = (FI == entryBB.end()) ? entryBB.getTerminator() : &*FI;
+        }
 
         for (unsigned int i = 0; i < tmpReg.size(); i++){
-            DemoteRegToStack(*tmpReg.at(i), false, insertPt);
+            DemoteRegToStack(*tmpReg.at(i), false, AllocaIP);
         }
         for (unsigned int i = 0; i < tmpPhi.size(); i++){
-            DemotePHIToStack(tmpPhi.at(i), insertPt);
+            DemotePHIToStack(tmpPhi.at(i), AllocaIP);
         }
     } while (tmpReg.size() != 0 || tmpPhi.size() != 0);
 }
-
 
 VMFlattenPass *llvm::createVMFlatten(bool flag) {
     return new VMFlattenPass(flag);
