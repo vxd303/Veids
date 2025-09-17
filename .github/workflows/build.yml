@@ -27,6 +27,8 @@ jobs:
         run: |
           sed -i 's/\.starts_with/\.startswith/g' Obfuscation/src/Utils.cpp
           sed -i 's/\.starts_with/\.startswith/g' Obfuscation/src/FunctionWrapper.cpp
+          # Patch BogusControlFlow.cpp to fix ICmpInst constructor error
+          sed -i 's/new ICmpInst(.*);/IRBuilder<>(I)->CreateICmpEQ(LHS, RHS, "BCFPlaceHolderPred");/g' Obfuscation/src/BogusControlFlow.cpp
           
       - name: Configure and build
         run: |
