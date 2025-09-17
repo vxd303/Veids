@@ -12,6 +12,18 @@
 #include "HikariStringEncryption.h"
 #include "CryptoUtils.h"
 #include "Utils.h"
+#include <llvm/ADT/StringRef.h>
+#include <llvm/Config/llvm-config.h>
+
+// Compat cho StringRef giữa LLVM 14 và bản mới hơn
+#if LLVM_VERSION_MAJOR >= 18
+#  define STRREF_STARTS_WITH(S,P)  ((S).starts_with(P))
+#  define STRREF_ENDS_WITH(S,P)    ((S).ends_with(P))
+#else
+#  define STRREF_STARTS_WITH(S,P)  ((S).startswith(P))
+#  define STRREF_ENDS_WITH(S,P)    ((S).endswith(P))
+#endif
+
 
 using namespace llvm;
 
@@ -23,7 +35,7 @@ static cl::opt<uint32_t>
 static uint32_t ElementEncryptProbTemp = 100;
 
 bool HikariStringEncryptionPass::handleableGV(GlobalVariable *GV) {
-    if (GV->hasInitializer() && !GV->getSection().starts_with("llvm.") &&
+    if (GV->hasInitializer() && !STRREF_STARTS_WITH(GV->getSection(), "llvm.") &&
         !(GV->getSection().contains("__objc") &&
           !GV->getSection().contains("array")) &&
         !GV->getName().contains("OBJC") &&
