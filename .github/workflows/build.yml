@@ -21,24 +21,21 @@ jobs:
       - name: Install dependencies for LLVM build
         run: |
           sudo apt-get update
-          sudo apt-get install -y lsb-release wget software-properties-common gnupg
-          
-          wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | sudo gpg --dearmor -o /etc/apt/keyrings/llvm-org.gpg
-          echo "deb [signed-by=/etc/apt/keyrings/llvm-org.gpg] http://apt.llvm.org/focal/ llvm-toolchain-focal-11 main" | sudo tee /etc/apt/sources.list.d/llvm.list
-          
-          sudo apt-get update
-          sudo apt-get install -y clang-11 lld-11 libclang-11-dev liblld-11-dev cmake g++-9
+          sudo apt-get install -y clang-14 lld-14 libclang-14-dev liblld-14-dev cmake
 
-      - name: Patch starts_with to startswith
+      - name: Patch source code for LLVM 14 compatibility
         run: |
+          # Patch starts_with to startswith
           sed -i 's/\.starts_with/\.startswith/g' Obfuscation/src/Utils.cpp
           sed -i 's/\.starts_with/\.startswith/g' Obfuscation/src/FunctionWrapper.cpp
-          
+          # Patch isEntryBlock() to be compatible with newer LLVM
+          sed -i 's/currBB->isEntryBlock()/currBB == \&F->getEntryBlock()/g' Obfuscation/src/SplitBasicBlock.cpp
+
       - name: Configure and build
         run: |
           mkdir build
           cd build
-          cmake -DCMAKE_CXX_COMPILER=g++-9 -DLLVM_DIR=/usr/lib/llvm-11/cmake -DLT_LLVM_INSTALL_DIR=/usr/lib/llvm-11 ../Obfuscation
+          cmake -DLLVM_DIR=/usr/lib/llvm-14/cmake -DLT_LLVM_INSTALL_DIR=/usr/lib/llvm-14 ../Obfuscation
           make
 
       - name: Locate plugin
