@@ -30,10 +30,12 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y clang-11 lld-11 libclang-11-dev liblld-11-dev cmake
 
-      - name: Patch starts_with to startswith
+      - name: Patch source code for LLVM 11 compatibility
         run: |
           sed -i 's/\.starts_with/\.startswith/g' Obfuscation/src/Utils.cpp
           sed -i 's/\.starts_with/\.startswith/g' Obfuscation/src/FunctionWrapper.cpp
+          # Patch isEntryBlock to check for entry block manually
+          sed -i 's/currBB->isEntryBlock()/currBB == \&F->getEntryBlock()/g' Obfuscation/src/SplitBasicBlock.cpp
           
       - name: Configure and build
         run: |
