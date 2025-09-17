@@ -39,6 +39,9 @@ jobs:
           find "$D" -type f \( -name '*.cpp' -o -name '*.h' \) -print0 \
             | xargs -0 sed -i 's/\.starts_with(/.startswith(/g'
 
+          # String_view::startswith -> starts_with
+          sed -i 's/Name.startswith("function")/Name.starts_with("function")/' "$D/src/PMRegistration.cpp"
+
           # include <optional> khi dùng std::optional/nullopt
           mapfile -t OPT_FILES < <(grep -RIl --include='*.{cpp,h}' -e 'std::optional' -e 'std::nullopt' "$D" || true)
           for f in "${OPT_FILES[@]}"; do
