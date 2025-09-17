@@ -37,8 +37,9 @@ jobs:
           find "$D" -type f \( -name '*.cpp' -o -name '*.h' \) -print0 \
             | xargs -0 sed -i 's/\.starts_with(/.startswith(/g'
 
-          find "$D" -type f \( -name '*.cpp' -o -name '*.h' \) -print0 \
-            | xargs -0 sed -i 's/\.startswith("function")/starts_with("function")/'
+          # 2. Vá lỗi cụ thể: PMRegistration.cpp sử dụng std::string_view::startswith()
+          # Lệnh này sẽ sửa trường hợp lỗi duy nhất này thành phương thức đúng
+          sed -i 's/Name.startswith("function")/Name.starts_with("function")/' "$D/src/PMRegistration.cpp"
 
           mapfile -t OPT_FILES < <(grep -RIl --include='*.{cpp,h}' -e 'std::optional' -e 'std::nullopt' "$D" || true)
           for f in "${OPT_FILES[@]}"; do
