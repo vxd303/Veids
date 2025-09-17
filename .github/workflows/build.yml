@@ -1,5 +1,7 @@
+# Tên của workflow
 name: Build and Test SsagePass on Dev Branch
 
+# Các sự kiện kích hoạt workflow
 on:
   push:
     branches:
@@ -10,76 +12,71 @@ on:
 
 jobs:
   build_and_test:
+    # Sử dụng máy ảo Ubuntu 22.04
     runs-on: ubuntu-22.04
 
     steps:
+      # Bước 1: Checkout mã nguồn từ nhánh 'dev'
       - name: Checkout dev branch
         uses: actions/checkout@v4
         with:
           ref: 'dev'
 
+      # Bước 2: Cài đặt các gói phụ thuộc cần thiết
       - name: Install dependencies for LLVM build
         run: |
           sudo apt-get update
           sudo apt-get install -y clang-14 lld-14 libclang-14-dev liblld-14-dev cmake
-      - name: Cấu hình chuẩn C++17 trong CMake
+
+      # Bước 3: Cấu hình CMake để sử dụng chuẩn C++20
+      - name: Configure for C++20 Standard in CMake
         run: |
           set -euxo pipefail
           D="Obfuscation"
-          # Thêm hoặc cập nhật chuẩn C++ thành 17 trong CMakeLists.txt
+          # Tìm và thay thế CMAKE_CXX_STANDARD thành 20.
+          # Nếu chưa có, thêm dòng set(CMAKE_CXX_STANDARD 20) vào cuối file.
           if grep -qE 'CMAKE_CXX_STANDARD' "$D/CMakeLists.txt"; then
-            sed -i -E 's/CMAKE_CXX_STANDARD[[:space:]]+[0-9]+/CMAKE_CXX_STANDARD 17/' "$D/CMakeLists.txt"
+            sed -i -E 's/CMAKE_CXX_STANDARD[[:space:]]+[0-9]+/CMAKE_CXX_STANDARD 20/' "$D/CMakeLists.txt"
           else
-            printf '\nset(CMAKE_CXX_STANDARD 17)\n' >> "$D/CMakeLists.txt"
+            printf '\nset(CMAKE_CXX_STANDARD 20)\n' >> "$D/CMakeLists.txt"
           fi
+          echo "CMakeLists.txt configured to use C++20."
 
-      - name: Patch sources for LLVM 14 (C++17, starts_with, <optional>, Demote*)
+      # Bước 4: Vá lỗi mã nguồn để tương thích với LLVM 14
+      - name: Patch sources for LLVM 14
         run: |
           set -euxo pipefail
           D="Obfuscation"
 
-          if grep -qE 'CMAKE_CXX_STANDARD' "$D/CMakeLists.txt"; then
-            sed -i -E 's/CMAKE_CXX_STANDARD[[:space:]]+[0-9]+/CMAKE_CXX_STANDARD 17/' "$D/CMakeLists.txt"
-          else
-            printf '\nset(CMAKE_CXX_STANDARD 17)\n' >> "$D/CMakeLists.txt"
-          fi
-
-          find "$D" -type f \( -name '*.cpp' -o -name '*.h' \) -print0 \
-            | xargs -0 sed -i 's/\.starts_with(/.startswith(/g'
-
-          # 2. Vá lỗi cụ thể: PMRegistration.cpp sử dụng std::string_view::startswith()
-          # Lệnh này sẽ sửa trường hợp lỗi duy nhất này thành phương thức đúng
-          sed -i 's/Name.startswith("function")/Name.starts_with("function")/' "$D/src/PMRegistration.cpp"
-
+          # Đảm bảo header <optional> được thêm vào các file sử dụng std::optional
           mapfile -t OPT_FILES < <(grep -RIl --include='*.{cpp,h}' -e 'std::optional' -e 'std::nullopt' "$D" || true)
           for f in "${OPT_FILES[@]}"; do
             grep -qE '^[[:space:]]*#include <optional>' "$f" || sed -i '1i #include <optional>' "$f"
           done
 
+          # Vá lỗi cho Demote* trong Utils.cpp
           if [ -f "$D/src/Utils.cpp" ]; then
             perl -0777 -pe 's/DemotePHIToStack\s*\(\s*PN\s*,\s*insertPoint\s*\)/DemotePHIToStack(PN, insertPoint ? \&\*insertPoint.value() : nullptr)/g' -i "$D/src/Utils.cpp" || true
             perl -0777 -pe 's/DemoteRegToStack\s*\(\s*\*I\s*,\s*false\s*,\s*insertPoint\s*\)/DemoteRegToStack(*I, false, insertPoint ? \&\*insertPoint.value() : nullptr)/g' -i "$D/src/Utils.cpp" || true
           fi
 
+          # Vá lỗi cho Demote* trong VMFlatten.cpp
           if [ -f "$D/src/VMFlatten.cpp" ]; then
             perl -0777 -pe 's/DemotePHIToStack\s*\(\s*([^\),]+)\s*,\s*insertionPoint\s*\)/DemotePHIToStack(\1, \&*insertionPoint)/g' -i "$D/src/VMFlatten.cpp" || true
             perl -0777 -pe 's/DemoteRegToStack\s*\(\s*([^\),]+)\s*,\s*false\s*,\s*insertionPoint\s*\)/DemoteRegToStack(\1, false, \&*insertionPoint)/g' -i "$D/src/VMFlatten.cpp" || true
           fi
-          
-          F="$D/src/BogusControlFlow.cpp"
-          if [ -f "$F" ]; then
-            sed -i 's/InsertBefore->getIterator()/InsertBefore/g' "$F"
-            perl -0777 -pe 's/getFirstNonPHIOrDbgOrLifetime\(\)\s*(==|!=)/getFirstNonPHIOrDbgOrLifetime()->getIterator() $1/g' -i "$F"
-            sed -i 's/\<getFirstNonPHIOrDbgOrLifetime()\s*;/getFirstNonPHIOrDbgOrLifetime()->getIterator();/g' "$F"
+
+          # Vá lỗi cho BogusControlFlow.cpp
+          F_BCF="$D/src/BogusControlFlow.cpp"
+          if [ -f "$F_BCF" ]; then
+            sed -i 's/InsertBefore->getIterator()/InsertBefore/g' "$F_BCF"
+            perl -0777 -pe 's/getFirstNonPHIOrDbgOrLifetime\(\)\s*(==|!=)/getFirstNonPHIOrDbgOrLifetime()->getIterator() $1/g' -i "$F_BCF"
+            sed -i 's/\<getFirstNonPHIOrDbgOrLifetime()\s*;/getFirstNonPHIOrDbgOrLifetime()->getIterator();/g' "$F_BCF"
+            # Thay thế constructor ICmpInst cũ bằng IRBuilder
+            perl -i -0777 -pe 's/new ICmpInst\(\s*I,\s*CmpInst::ICMP_EQ,\s*LHS,\s*RHS,\s*"BCFPlaceHolderPred"\s*\);/llvm::IRBuilder<>(I)->CreateICmpEQ(LHS, RHS, "BCFPlaceHolderPred");/g' "$F_BCF"
           fi
 
-          # New perl patch for the ICmpInst constructor
-          if [ -f "$D/src/BogusControlFlow.cpp" ]; then
-            perl -i -0777 -pe '
-              s/new ICmpInst\(I, CmpInst::ICMP_EQ, LHS, RHS, "BCFPlaceHolderPred"\);/llvm::IRBuilder<>(I)->CreateICmpEQ(LHS, RHS, "BCFPlaceHolderPred");/g;
-            ' "$D/src/BogusControlFlow.cpp"
-          fi
-      
+      # Bước 5: Vá lỗi cho IPObfuscationContext.cpp
       - name: Fix IPObfuscationContext for LLVM14
         run: |
           set -euxo pipefail
@@ -93,6 +90,7 @@ jobs:
             sed -i 's/NF->getBasicBlockList().splice(NF->begin(), F.getBasicBlockList());/NF->getBasicBlockList().splice(NF->getBasicBlockList().begin(), F->getBasicBlockList());/' "$F" || true
           fi
 
+      # Bước 6: Vá lỗi cho LegacyLowerSwitch.cpp
       - name: Fix LegacyLowerSwitch for LLVM14
         run: |
           set -euxo pipefail
@@ -101,24 +99,14 @@ jobs:
             sed -i 's/getFirstNonPHI()/getFirstNonPHI()->getIterator()/g' "$D/src/LegacyLowerSwitch.cpp"
           fi
 
+      # Bước 7: Vá lỗi cho IndirectBranch.cpp
       - name: Clean IndirectBranch accidental getIterator() on map iters
         run: |
           set -euxo pipefail
           D="Obfuscation"
           [ -f "$D/src/IndirectBranch.cpp" ] && sed -i 's/->getIterator()//g' "$D/src/IndirectBranch.cpp" || true
-      - name: Vá lỗi BogusControlFlow cho LLVM 14
-        run: |
-          set -euxo pipefail
-          D="Obfuscation"
-          F="$D/src/BogusControlFlow.cpp"
 
-          if [ -f "$F" ]; then
-            # Sử dụng perl để thay thế toàn bộ dòng lỗi
-            perl -i -0777 -pe '
-              s/new ICmpInst\(\s*I,\s*CmpInst::ICMP_EQ,\s*LHS,\s*RHS,\s*"BCFPlaceHolderPred"\s*\);/llvm::IRBuilder<>(I)->CreateICmpEQ(LHS, RHS, "BCFPlaceHolderPred");/g;
-            ' "$F"
-          fi
-      
+      # Bước 8: Cấu hình và biên dịch dự án
       - name: Configure and build
         run: |
           mkdir build
@@ -126,6 +114,7 @@ jobs:
           cmake -DLLVM_DIR=/usr/lib/llvm-14/cmake -DLT_LLVM_INSTALL_DIR=/usr/lib/llvm-14 ../Obfuscation
           make
 
+      # Bước 9: Tìm file plugin .so đã được build
       - name: Locate plugin
         id: find_plugin
         run: |
@@ -135,6 +124,7 @@ jobs:
           echo "plugin=$f" >> "$GITHUB_OUTPUT"
           ls -l "$f" && file "$f"
 
+      # Bước 10: Cài đặt Android NDK r25c
       - name: Setup NDK r25c
         id: setup-ndk
         uses: nttld/setup-ndk@v1
@@ -142,6 +132,7 @@ jobs:
           ndk-version: r25c
           add-to-path: true
 
+      # Bước 11: Kiểm tra biên dịch với NDK và plugin
       - name: NDK compile test (load plugin at compile time)
         run: |
           set -euxo pipefail
@@ -161,6 +152,7 @@ jobs:
           "$CXX" --target=aarch64-linux-android31 ndk_test.o -shared -o libndk_test.so
           file libndk_test.so || true
 
+      # Bước 12: Tải lên các artifacts đã build
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
