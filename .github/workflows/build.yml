@@ -33,8 +33,6 @@ jobs:
         run: |
           set -euxo pipefail
           D="Obfuscation"
-          # Tìm và thay thế CMAKE_CXX_STANDARD thành 20.
-          # Nếu chưa có, thêm dòng set(CMAKE_CXX_STANDARD 20) vào cuối file.
           if grep -qE 'CMAKE_CXX_STANDARD' "$D/CMakeLists.txt"; then
             sed -i -E 's/CMAKE_CXX_STANDARD[[:space:]]+[0-9]+/CMAKE_CXX_STANDARD 20/' "$D/CMakeLists.txt"
           else
@@ -47,33 +45,35 @@ jobs:
         run: |
           set -euxo pipefail
           D="Obfuscation"
-
-          # Đảm bảo header <optional> được thêm vào các file sử dụng std::optional
           mapfile -t OPT_FILES < <(grep -RIl --include='*.{cpp,h}' -e 'std::optional' -e 'std::nullopt' "$D" || true)
           for f in "${OPT_FILES[@]}"; do
             grep -qE '^[[:space:]]*#include <optional>' "$f" || sed -i '1i #include <optional>' "$f"
           done
-
-          # Vá lỗi cho Demote* trong Utils.cpp
           if [ -f "$D/src/Utils.cpp" ]; then
             perl -0777 -pe 's/DemotePHIToStack\s*\(\s*PN\s*,\s*insertPoint\s*\)/DemotePHIToStack(PN, insertPoint ? \&\*insertPoint.value() : nullptr)/g' -i "$D/src/Utils.cpp" || true
             perl -0777 -pe 's/DemoteRegToStack\s*\(\s*\*I\s*,\s*false\s*,\s*insertPoint\s*\)/DemoteRegToStack(*I, false, insertPoint ? \&\*insertPoint.value() : nullptr)/g' -i "$D/src/Utils.cpp" || true
           fi
-
-          # Vá lỗi cho Demote* trong VMFlatten.cpp
           if [ -f "$D/src/VMFlatten.cpp" ]; then
             perl -0777 -pe 's/DemotePHIToStack\s*\(\s*([^\),]+)\s*,\s*insertionPoint\s*\)/DemotePHIToStack(\1, \&*insertionPoint)/g' -i "$D/src/VMFlatten.cpp" || true
             perl -0777 -pe 's/DemoteRegToStack\s*\(\s*([^\),]+)\s*,\s*false\s*,\s*insertionPoint\s*\)/DemoteRegToStack(\1, false, \&*insertionPoint)/g' -i "$D/src/VMFlatten.cpp" || true
           fi
-
-          # Vá lỗi cho BogusControlFlow.cpp
           F_BCF="$D/src/BogusControlFlow.cpp"
           if [ -f "$F_BCF" ]; then
             sed -i 's/InsertBefore->getIterator()/InsertBefore/g' "$F_BCF"
             perl -0777 -pe 's/getFirstNonPHIOrDbgOrLifetime\(\)\s*(==|!=)/getFirstNonPHIOrDbgOrLifetime()->getIterator() $1/g' -i "$F_BCF"
             sed -i 's/\<getFirstNonPHIOrDbgOrLifetime()\s*;/getFirstNonPHIOrDbgOrLifetime()->getIterator();/g' "$F_BCF"
-            # Thay thế constructor ICmpInst cũ bằng IRBuilder
             perl -i -0777 -pe 's/new ICmpInst\(\s*I,\s*CmpInst::ICMP_EQ,\s*LHS,\s*RHS,\s*"BCFPlaceHolderPred"\s*\);/llvm::IRBuilder<>(I)->CreateICmpEQ(LHS, RHS, "BCFPlaceHolderPred");/g' "$F_BCF"
+          fi
+
+      # !! BƯỚC MỚI ĐƯỢC THÊM VÀO ĐÂY !!
+      # Vá lỗi tên phương thức của llvm::StringRef trong Utils.cpp
+      - name: Fix llvm::StringRef method in Utils.cpp
+        run: |
+          set -euxo pipefail
+          F="Obfuscation/src/Utils.cpp"
+          if [ -f "$F" ]; then
+            echo "Patching .starts_with -> .startswith in $F"
+            sed -i 's/\.starts_with(/.startswith(/g' "$F"
           fi
 
       # Bước 5: Vá lỗi cho IPObfuscationContext.cpp
