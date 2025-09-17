@@ -25,11 +25,13 @@ jobs:
 
       - name: Patch source code for LLVM 14 compatibility
         run: |
-          # Patch starts_with to startswith
+          # Patches for StringRef API changes
           sed -i 's/\.starts_with/\.startswith/g' Obfuscation/src/Utils.cpp
           sed -i 's/\.starts_with/\.startswith/g' Obfuscation/src/FunctionWrapper.cpp
           # Patch isEntryBlock() to be compatible with newer LLVM
           sed -i 's/currBB->isEntryBlock()/currBB == \&F->getEntryBlock()/g' Obfuscation/src/SplitBasicBlock.cpp
+          # Patch ICmpInst constructor call to use IRBuilder
+          sed -i 's/new ICmpInst(I, CmpInst::ICMP_EQ, LHS, RHS, "BCFPlaceHolderPred")/llvm::IRBuilder<>(I)->CreateICmpEQ(LHS, RHS, "BCFPlaceHolderPred")/g' Obfuscation/src/BogusControlFlow.cpp
 
       - name: Configure and build
         run: |
