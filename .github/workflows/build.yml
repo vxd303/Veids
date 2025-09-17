@@ -58,6 +58,16 @@ jobs:
           # Convert any lingering .starts_with/.ends_with usages to macros (optional sweep)
           perl -0777 -pe 's/([A-Za-z0-9_>\)\]]+)\.starts_with\(/STRREF_STARTS_WITH($1, /g' -i src/*.cpp || true
           perl -0777 -pe 's/([A-Za-z0-9_>\)\]]+)\.ends_with\(/STRREF_ENDS_WITH($1, /g' -i src/*.cpp || true
+          
+      - name: Normalize StringRef starts_with/ends_with
+        run: |
+          set -euxo pipefail
+          F="Obfuscation/src/HikariStringEncryption.cpp"
+          # Ensure compat macros present
+          grep -q 'STRREF_STARTS_WITH' "$F" || sed -i '1i #include <llvm/ADT/StringRef.h>\n#include <llvm/Config/llvm-config.h>\n#if LLVM_VERSION_MAJOR >= 18\n#define STRREF_STARTS_WITH(S,P) ((S).starts_with(P))\n#define STRREF_ENDS_WITH(S,P) ((S).ends_with(P))\n#else\n#define STRREF_STARTS_WITH(S,P) ((S).startswith(P))\n#define STRREF_ENDS_WITH(S,P) ((S).endswith(P))\n#endif\n' "$F"
+          # Convert lingering direct calls in this file
+          perl -0777 -pe 's/(\b[A-Za-z0-9_>\)\]]+)\.starts_with\(/STRREF_STARTS_WITH($1, /g' -i "$F" || true
+          perl -0777 -pe 's/(\b[A-Za-z0-9_>\)\]]+)\.ends_with\(/STRREF_ENDS_WITH($1, /g' -i "$F" || true
 
       # Bước 4: Vá lỗi mã nguồn để tương thích với LLVM 14
       - name: Patch sources for LLVM 14
