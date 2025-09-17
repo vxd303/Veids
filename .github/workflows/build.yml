@@ -10,7 +10,8 @@ on:
 
 jobs:
   build_and_test:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-20.04
+
     steps:
       - name: Checkout dev branch
         uses: actions/checkout@v4
@@ -22,26 +23,22 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y lsb-release wget software-properties-common gnupg
           
-          # Add LLVM repository
           wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | sudo gpg --dearmor -o /etc/apt/keyrings/llvm-org.gpg
           echo "deb [signed-by=/etc/apt/keyrings/llvm-org.gpg] http://apt.llvm.org/focal/ llvm-toolchain-focal-11 main" | sudo tee /etc/apt/sources.list.d/llvm.list
           
-          # Install LLVM 11
           sudo apt-get update
-          sudo apt-get install -y clang-11 lld-11 libclang-11-dev liblld-11-dev cmake
+          sudo apt-get install -y clang-11 lld-11 libclang-11-dev liblld-11-dev cmake g++-9
 
-      - name: Patch source code for LLVM 11 compatibility
+      - name: Patch starts_with to startswith
         run: |
           sed -i 's/\.starts_with/\.startswith/g' Obfuscation/src/Utils.cpp
           sed -i 's/\.starts_with/\.startswith/g' Obfuscation/src/FunctionWrapper.cpp
-          # Patch isEntryBlock to check for entry block manually
-          sed -i 's/currBB->isEntryBlock()/currBB == \&F->getEntryBlock()/g' Obfuscation/src/SplitBasicBlock.cpp
           
       - name: Configure and build
         run: |
           mkdir build
           cd build
-          cmake -DLLVM_DIR=/usr/lib/llvm-11/cmake -DLT_LLVM_INSTALL_DIR=/usr/lib/llvm-11 ../Obfuscation
+          cmake -DCMAKE_CXX_COMPILER=g++-9 -DLLVM_DIR=/usr/lib/llvm-11/cmake -DLT_LLVM_INSTALL_DIR=/usr/lib/llvm-11 ../Obfuscation
           make
 
       - name: Locate plugin
