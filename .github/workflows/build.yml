@@ -75,6 +75,14 @@ jobs:
             echo "Patching .starts_with -> .startswith in $F"
             sed -i 's/\.starts_with(/.startswith(/g' "$F"
           fi
+      - name: Fix llvm::StringRef method in FunctionWrapper.cpp
+        run: |
+          set -euxo pipefail
+          F="Obfuscation/src/FunctionWrapper.cpp"
+          if [ -f "$F" ]; then
+            echo "Patching .starts_with -> .startswith in $F"
+            sed -i 's/\.starts_with(/.startswith(/g' "$F"
+          fi
 
       # Bước 5: Vá lỗi cho IPObfuscationContext.cpp
       - name: Fix IPObfuscationContext for LLVM14
