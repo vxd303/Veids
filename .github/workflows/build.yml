@@ -27,7 +27,7 @@ jobs:
         run: |
           mkdir build
           cd build
-          cmake -DLLVM_DIR=/usr/lib/llvm-14/cmake ../Obfuscation
+          cmake -DLLVM_DIR=/usr/lib/llvm-14/cmake -DLT_LLVM_INSTALL_DIR=/usr/lib/llvm-14 ../Obfuscation
           make
 
       - name: Locate plugin
