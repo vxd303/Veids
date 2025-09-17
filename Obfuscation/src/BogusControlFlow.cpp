@@ -297,35 +297,37 @@ bool BogusControlFlowPass::containsSwiftError(BasicBlock *b) {
  * Add bogus flow to a given basic block, according to the header's
  * description
  */
-void BogusControlFlowPass::addBogusFlow(llvm::BasicBlock *basicBlock, llvm::Function &F) {
+void BogusControlFlowPass::addBogusFlow(llvm::BasicBlock *basicBlock, llvm::Function &F){
   using namespace llvm;
 
-  // Điểm chia block: sau các PHI/Dbg/Lifetime
+  // 1) Chọn vị trí tách block sau PHI/Dbg/Lifetime
   BasicBlock::iterator i1 = basicBlock->begin();
   if (basicBlock->getFirstNonPHIOrDbgOrLifetime())
     i1 = (BasicBlock::iterator)basicBlock->getFirstNonPHIOrDbgOrLifetime();
 
-  // Trường hợp đặc biệt với probe-stack trên entry
+  // probe-stack & entry block: đừng tách giữa dãy Alloca
   if (F.hasFnAttribute("probe-stack") && basicBlock->isEntryBlock()) {
     while ((i1 != basicBlock->end()) && isa<AllocaInst>(i1)) ++i1;
     if (i1 == basicBlock->end()) return;
   }
 
-  // Tách thành originalBB và tạo alteredBB clone
+  // 2) Tách block & clone
   BasicBlock *originalBB = basicBlock->splitBasicBlock(i1, "originalBB");
   BasicBlock *alteredBB  = createAlteredBasicBlock(originalBB, "alteredBB", &F);
 
-  // Xoá terminator mặc định để tự gắn nhánh
+  // 3) Xoá terminator mặc định để tự gắn nhánh
   if (!OnlyJunkAssemblyTemp)
     alteredBB->getTerminator()->eraseFromParent();
   basicBlock->getTerminator()->eraseFromParent();
 
-  // Điều kiện placeholder luôn-đúng (dùng i32 để tránh FP loop kỳ quặc)
+  // 4) Điều kiện placeholder luôn-đúng (i32 để tránh FP-loop kỳ quặc)
   Value *LHS = ConstantInt::get(Type::getInt32Ty(F.getContext()), 1);
   Value *RHS = ConstantInt::get(Type::getInt32Ty(F.getContext()), 1);
 
-  // Tạo so sánh ở CUỐI basicBlock (overload BasicBlock& an toàn với LLVM 14+)
-  ICmpInst *condition = new ICmpInst(*basicBlock, ICmpInst::ICMP_EQ, LHS, RHS, "BCFPlaceHolderPred");
+  // --- condition tại CUỐI basicBlock ---
+  IRBuilder<> IRB1(basicBlock); // insert-at-end of basicBlock
+  Value *condV1 = IRB1.CreateICmp(ICmpInst::ICMP_EQ, LHS, RHS, "BCFPlaceHolderPred");
+  auto *condition = cast<ICmpInst>(condV1);
   needtoedit.emplace_back(condition);
 
   // Nhánh: true -> originalBB, false -> alteredBB
@@ -334,16 +336,18 @@ void BogusControlFlowPass::addBogusFlow(llvm::BasicBlock *basicBlock, llvm::Func
   // alteredBB quay về originalBB
   BranchInst::Create(originalBB, alteredBB);
 
-  // Chia originalBB ngay trước terminator của nó
+  // 5) Chia originalBB ngay trước terminator
   BasicBlock::iterator it = originalBB->end();
   BasicBlock *originalBBpart2 = originalBB->splitBasicBlock(--it, "originalBBpart2");
   originalBB->getTerminator()->eraseFromParent();
 
-  // Điều kiện thứ 2 tại CUỐI originalBB
-  ICmpInst *condition2 = new ICmpInst(*originalBB, ICmpInst::ICMP_EQ, LHS, RHS, "BCFPlaceHolderPred");
+  // --- condition2 tại CUỐI originalBB ---
+  IRBuilder<> IRB2(originalBB); // insert-at-end of originalBB
+  Value *condV2 = IRB2.CreateICmp(ICmpInst::ICMP_EQ, LHS, RHS, "BCFPlaceHolderPred");
+  auto *condition2 = cast<ICmpInst>(condV2);
   needtoedit.emplace_back(condition2);
 
-  // Ngẫu nhiên hoá đích để giảm pattern
+  // 6) Random hoá đích nhánh để giảm pattern
   switch (cryptoutils->get_range(2)) {
     case 0:
       BranchInst::Create(originalBBpart2, originalBB, condition2, originalBB);
@@ -355,6 +359,7 @@ void BogusControlFlowPass::addBogusFlow(llvm::BasicBlock *basicBlock, llvm::Func
       llvm_unreachable("wtf?");
   }
 }
+
 
 
 /* createAlteredBasicBlock
