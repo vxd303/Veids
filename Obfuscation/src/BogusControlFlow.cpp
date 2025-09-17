@@ -298,110 +298,77 @@ bool BogusControlFlowPass::containsSwiftError(BasicBlock *b) {
  * description
  */
 void BogusControlFlowPass::addBogusFlow(BasicBlock *basicBlock, Function &F){
-    // Split the block: first part with only the phi nodes and debug info and
-    // terminator
-    //                  created by splitBasicBlock. (-> No instruction)
-    //                  Second part with every instructions from the original
-    //                  block
-    // We do this way, so we don't have to adjust all the phi nodes, metadatas
-    // and so on for the first block. We have to let the phi nodes in the first
-    // part, because they actually are updated in the second part according to
-    // them.
-    BasicBlock::iterator i1 = basicBlock->begin();
-    if (basicBlock->getFirstNonPHIOrDbgOrLifetime())
-      i1 = (BasicBlock::iterator)basicBlock->getFirstNonPHIOrDbgOrLifetime();
+  // --- giữ nguyên phần chuẩn bị như code của bạn ---
+  BasicBlock::iterator i1 = basicBlock->begin();
+  if (basicBlock->getFirstNonPHIOrDbgOrLifetime())
+    i1 = (BasicBlock::iterator)basicBlock->getFirstNonPHIOrDbgOrLifetime();
 
-    // https://github.com/eshard/obfuscator-llvm/commit/85c8719c86bcb4784f5a436e28f3496e91cd6292
-    /* TODO: find a real fix or try with the probe-stack inline-asm when its
-     * ready. See https://github.com/Rust-for-Linux/linux/issues/355. Sometimes
-     * moving an alloca from the entry block to the second block causes a
-     * segfault when using the "probe-stack" attribute (observed with with Rust
-     * programs). To avoid this issue we just split the entry block after the
-     * allocas in this case.
-     */
-    if (F.hasFnAttribute("probe-stack") && basicBlock->isEntryBlock()) {
-      // Find the first non alloca instruction
-      while ((i1 != basicBlock->end()) && isa<AllocaInst>(i1))
-        i1++;
+  if (F.hasFnAttribute("probe-stack") && basicBlock->isEntryBlock()) {
+    while ((i1 != basicBlock->end()) && isa<AllocaInst>(i1)) i1++;
+    if (i1 == basicBlock->end()) return;
+  }
 
-      // If there are no other kind of instruction we just don't split that
-      // entry block
-      if (i1 == basicBlock->end())
-        return;
-    }
+  BasicBlock *originalBB = basicBlock->splitBasicBlock(i1, "originalBB");
+  BasicBlock *alteredBB  = createAlteredBasicBlock(originalBB, "alteredBB", &F);
 
-    BasicBlock *originalBB = basicBlock->splitBasicBlock(i1, "originalBB");
+  if (!OnlyJunkAssemblyTemp)
+    alteredBB->getTerminator()->eraseFromParent();
+  basicBlock->getTerminator()->eraseFromParent();
 
-    // Creating the altered basic block on which the first basicBlock will jump
-    BasicBlock *alteredBB =
-        createAlteredBasicBlock(originalBB, "alteredBB", &F);
+  // Điều kiện luôn-đúng (dùng i32 để tránh FP-const lặp bất thường)
+  Value *LHS = ConstantInt::get(Type::getInt32Ty(F.getContext()), 1);
+  Value *RHS = ConstantInt::get(Type::getInt32Ty(F.getContext()), 1);
 
-    // Now that all the blocks are created,
-    // we modify the terminators to adjust the control flow.
+  // Helper chọn nơi chèn an toàn (Instruction*)
+  auto pickInsertBefore = [](BasicBlock *BB) -> Instruction* {
+    if (Instruction *T = BB->getTerminator()) return T;
+    // Nếu chưa có terminator, chèn trước instruction cuối nếu có
+    if (!BB->empty()) return &BB->back();
+    return nullptr; // block rỗng (hiếm); caller sẽ fallback
+  };
 
-    if (!OnlyJunkAssemblyTemp)
-      alteredBB->getTerminator()->eraseFromParent();
-    basicBlock->getTerminator()->eraseFromParent();
+  // ---- condition cho 'basicBlock' ----
+  ICmpInst *condition = nullptr;
+  if (Instruction *IB = pickInsertBefore(basicBlock)) {
+    condition = new ICmpInst(IB, ICmpInst::ICMP_EQ, LHS, RHS, "BCFPlaceHolderPred");
+  } else {
+    // fallback: insert-at-end overload (ổn với LLVM 14+; vẫn có ở các bản mới)
+    condition = new ICmpInst(*basicBlock, ICmpInst::ICMP_EQ, LHS, RHS, "BCFPlaceHolderPred");
+  }
+  needtoedit.emplace_back(condition);
 
-    // Preparing a condition..
-    // For now, the condition is an always true comparaison between 2 float
-    // This will be complicated after the pass (in doFinalization())
+  // Nhánh từ basicBlock → (true) originalBB / (false) alteredBB
+  BranchInst::Create(originalBB, alteredBB, condition, basicBlock);
 
-    // We need to use ConstantInt instead of ConstantFP as ConstantFP results in
-    // strange dead-loop when injected into Xcode
-    Value *LHS = ConstantInt::get(Type::getInt32Ty(F.getContext()), 1);
-    Value *RHS = ConstantInt::get(Type::getInt32Ty(F.getContext()), 1);
+  // alteredBB quay về originalBB
+  BranchInst::Create(originalBB, alteredBB);
 
-#if LLVM_VERSION_MAJOR >= 19
-    ICmpInst *condition = new ICmpInst(basicBlock->end(), ICmpInst::ICMP_EQ,
-                                       LHS, RHS, "BCFPlaceHolderPred");
-#else
-    ICmpInst *condition = new ICmpInst(*basicBlock, ICmpInst::ICMP_EQ, LHS, RHS,
-                                       "BCFPlaceHolderPred");
-#endif
-    needtoedit.emplace_back(condition);
+  // --- chia originalBB để tạo cảm giác rẽ nhánh ---
+  BasicBlock::iterator i = originalBB->end();
+  BasicBlock *originalBBpart2 = originalBB->splitBasicBlock(--i, "originalBBpart2");
+  originalBB->getTerminator()->eraseFromParent();
 
-    // Jump to the original basic block if the condition is true or
-    // to the altered block if false.
-    BranchInst::Create(originalBB, alteredBB, condition, basicBlock);
+  // ---- condition2 cho 'originalBB' ----
+  ICmpInst *condition2 = nullptr;
+  if (Instruction *IB2 = pickInsertBefore(originalBB)) {
+    condition2 = new ICmpInst(IB2, ICmpInst::ICMP_EQ, LHS, RHS, "BCFPlaceHolderPred");
+  } else {
+    condition2 = new ICmpInst(*originalBB, ICmpInst::ICMP_EQ, LHS, RHS, "BCFPlaceHolderPred");
+  }
+  needtoedit.emplace_back(condition2);
 
-    // The altered block loop back on the original one.
-    BranchInst::Create(originalBB, alteredBB);
-
-    // The end of the originalBB is modified to give the impression that
-    // sometimes it continues in the loop, and sometimes it return the desired
-    // value (of course it's always true, so it always use the original
-    // terminator..
-    //  but this will be obfuscated too;) )
-
-    // iterate on instruction just before the terminator of the originalBB
-    BasicBlock::iterator i = originalBB->end();
-
-    // Split at this point (we only want the terminator in the second part)
-    BasicBlock *originalBBpart2 =
-        originalBB->splitBasicBlock(--i, "originalBBpart2");
-    // the first part go either on the return statement or on the begining
-    // of the altered block.. So we erase the terminator created when splitting.
-    originalBB->getTerminator()->eraseFromParent();
-    // We add at the end a new always true condition
-    ICmpInst *condition2 = new ICmpInst(originalBB->end(), ICmpInst::ICMP_EQ,
-                                       LHS, RHS, "BCFPlaceHolderPred");
-    needtoedit.emplace_back(condition2);
-    // Do random behavior to avoid pattern recognition.
-    // This is achieved by jumping to a random BB
-    switch (cryptoutils->get_range(2)) {
-    case 0: {
+  // Random hoá đích nhánh để giảm pattern
+  switch (cryptoutils->get_range(2)) {
+    case 0:
       BranchInst::Create(originalBBpart2, originalBB, condition2, originalBB);
       break;
-    }
-    case 1: {
+    case 1:
       BranchInst::Create(originalBBpart2, alteredBB, condition2, originalBB);
       break;
-    }
     default:
       llvm_unreachable("wtf?");
-    }
-} // end of addBogusFlow()
+  }
+}
 
 /* createAlteredBasicBlock
  *
