@@ -22,6 +22,16 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y clang-14 lld-14 libclang-14-dev liblld-14-dev cmake
+      - name: Cấu hình chuẩn C++17 trong CMake
+        run: |
+          set -euxo pipefail
+          D="Obfuscation"
+          # Thêm hoặc cập nhật chuẩn C++ thành 17 trong CMakeLists.txt
+          if grep -qE 'CMAKE_CXX_STANDARD' "$D/CMakeLists.txt"; then
+            sed -i -E 's/CMAKE_CXX_STANDARD[[:space:]]+[0-9]+/CMAKE_CXX_STANDARD 17/' "$D/CMakeLists.txt"
+          else
+            printf '\nset(CMAKE_CXX_STANDARD 17)\n' >> "$D/CMakeLists.txt"
+          fi
 
       - name: Patch sources for LLVM 14 (C++17, starts_with, <optional>, Demote*)
         run: |
