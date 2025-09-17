@@ -23,16 +23,78 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y clang-14 lld-14 libclang-14-dev liblld-14-dev cmake
 
-      - name: Patch source code for LLVM 14 compatibility
+      - name: Patch sources for LLVM 14 (C++17, startswith, <optional>, Demote*)
         run: |
-          # Patches for StringRef API changes
-          sed -i 's/\.starts_with/\.startswith/g' Obfuscation/src/Utils.cpp
-          sed -i 's/\.starts_with/\.startswith/g' Obfuscation/src/FunctionWrapper.cpp
-          # Patch isEntryBlock() to be compatible with newer LLVM
-          sed -i 's/currBB->isEntryBlock()/currBB == \&F->getEntryBlock()/g' Obfuscation/src/SplitBasicBlock.cpp
-          # Patch ICmpInst constructor call at a specific line number
-          sed -i '388s/new ICmpInst(I, CmpInst::ICMP_EQ, LHS, RHS, "BCFPlaceHolderPred");/llvm::IRBuilder<>(I)->CreateICmpEQ(LHS, RHS, "BCFPlaceHolderPred");/g' Obfuscation/src/BogusControlFlow.cpp
+          set -euxo pipefail
+          D="Obfuscation"
+
+          # C++17
+          if grep -qE 'CMAKE_CXX_STANDARD' "$D/CMakeLists.txt"; then
+            sed -i -E 's/CMAKE_CXX_STANDARD[[:space:]]+[0-9]+/CMAKE_CXX_STANDARD 17/' "$D/CMakeLists.txt"
+          else
+            printf '\nset(CMAKE_CXX_STANDARD 17)\n' >> "$D/CMakeLists.txt"
+          fi
+
+          # StringRef::starts_with -> startswith
+          find "$D" -type f \( -name '*.cpp' -o -name '*.h' \) -print0 \
+            | xargs -0 sed -i 's/\.starts_with(/.startswith(/g'
+
+          # include <optional> khi dùng std::optional/nullopt
+          mapfile -t OPT_FILES < <(grep -RIl --include='*.{cpp,h}' -e 'std::optional' -e 'std::nullopt' "$D" || true)
+          for f in "${OPT_FILES[@]}"; do
+            grep -qE '^[[:space:]]*#include <optional>' "$f" || sed -i '1i #include <optional>' "$f"
+          done
+
+          # Utils.cpp: Demote* nhận Instruction*
+          if [ -f "$D/src/Utils.cpp" ]; then
+            perl -0777 -pe 's/DemotePHIToStack\s*\(\s*PN\s*,\s*insertPoint\s*\)/DemotePHIToStack(PN, insertPoint ? \&\*insertPoint.value() : nullptr)/g' -i "$D/src/Utils.cpp" || true
+            perl -0777 -pe 's/DemoteRegToStack\s*\(\s*\*I\s*,\s*false\s*,\s*insertPoint\s*\)/DemoteRegToStack(*I, false, insertPoint ? \&\*insertPoint.value() : nullptr)/g' -i "$D/src/Utils.cpp" || true
+          fi
+
+          # VMFlatten.cpp: iterator -> Instruction*
+          if [ -f "$D/src/VMFlatten.cpp" ]; then
+            perl -0777 -pe 's/DemotePHIToStack\s*\(\s*([^\),]+)\s*,\s*insertionPoint\s*\)/DemotePHIToStack(\1, \&*insertionPoint)/g' -i "$D/src/VMFlatten.cpp" || true
+            perl -0777 -pe 's/DemoteRegToStack\s*\(\s*([^\),]+)\s*,\s*false\s*,\s*insertionPoint\s*\)/DemoteRegToStack(\1, false, \&*insertionPoint)/g' -i "$D/src/VMFlatten.cpp" || true
+          fi
           
+          # Fix BogusControlFlow for LLVM14 (Create insert point + iterator use)
+          F="$D/src/BogusControlFlow.cpp"
+          if [ -f "$F" ]; then
+            # 1) BinaryOperator::Create(..., InsertBefore->getIterator()) -> InsertBefore (Instruction*)
+            sed -i 's/InsertBefore->getIterator()/InsertBefore/g' "$F"
+            # 2) So sánh với begin()/end(): chuyển Instruction* -> iterator
+            perl -0777 -pe 's/getFirstNonPHIOrDbgOrLifetime\(\)\s*(==|!=)/getFirstNonPHIOrDbgOrLifetime()->getIterator() $1/g' -i "$F"
+            # 3) Gán/khởi tạo iterator bằng Instruction*: thêm ->getIterator()
+            sed -i 's/\<getFirstNonPHIOrDbgOrLifetime()\s*;/getFirstNonPHIOrDbgOrLifetime()->getIterator();/g' "$F"
+          fi
+      
+      - name: Fix IPObfuscationContext for LLVM14
+        run: |
+          set -euxo pipefail
+          D="Obfuscation"
+          F="$D/src/IPObfuscationContext.cpp"
+          if [ -f "$F" ]; then
+            sed -i 's/NF->splice(NF->begin(), F);/NF->getBasicBlockList().splice(NF->begin(), F.getBasicBlockList());/' "$F"
+            perl -0777 -pe 's/([A-Za-z_]\w*)->splice\(\s*\1->begin\(\)\s*,\s*([A-Za-z_]\w*)\s*\);/\1->getBasicBlockList().splice(\1->begin(), \2.getBasicBlockList());/g' -i "$F"
+            sed -i -E 's/([A-Za-z_]\w*)\.getBasicBlockList\(\)/\1->getBasicBlockList()/g' "$F"
+            perl -0777 -pe 's/([A-Za-z_]\w*)->getBasicBlockList\(\)\.splice\(\s*\1->begin\(\)\s*,/\1->getBasicBlockList().splice(\1->getBasicBlockList().begin(),/g' -i "$F"
+            sed -i 's/NF->getBasicBlockList().splice(NF->begin(), F.getBasicBlockList());/NF->getBasicBlockList().splice(NF->getBasicBlockList().begin(), F->getBasicBlockList());/' "$F" || true
+          fi
+
+      - name: Fix LegacyLowerSwitch for LLVM14
+        run: |
+          set -euxo pipefail
+          D="Obfuscation"
+          if [ -f "$D/src/LegacyLowerSwitch.cpp" ]; then
+            sed -i 's/getFirstNonPHI()/getFirstNonPHI()->getIterator()/g' "$D/src/LegacyLowerSwitch.cpp"
+          fi
+
+      - name: Clean IndirectBranch accidental getIterator() on map iters
+        run: |
+          set -euxo pipefail
+          D="Obfuscation"
+          [ -f "$D/src/IndirectBranch.cpp" ] && sed -i 's/->getIterator()//g' "$D/src/IndirectBranch.cpp" || true
+      
       - name: Configure and build
         run: |
           mkdir build
