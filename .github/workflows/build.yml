@@ -1,0 +1,80 @@
+name: Build and Test SsagePass on Dev Branch
+
+on:
+  push:
+    branches:
+      - dev
+  pull_request:
+    branches:
+      - dev
+
+jobs:
+  build_and_test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout dev branch
+        uses: actions/checkout@v4
+        with:
+          ref: 'dev' # Thêm dòng này để chỉ định checkout nhánh 'dev'
+
+      - name: Install dependencies for LLVM build
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-14 lld-14 libclang-14-dev liblld-14-dev cmake
+
+      - name: Configure CMake
+        run: |
+          mkdir build
+          cd build
+          cmake ..
+
+      - name: Build SsagePass
+        run: |
+          cd build
+          make
+
+      - name: Locate plugin
+        id: find_plugin
+        run: |
+          set -e
+          f=$(find build -type f -name "*SsageObfuscator*.so" -o -name "SsageObfuscator.so" | head -n1 || true)
+          test -n "$f" || { echo "::error::plugin .so not found"; find build -maxdepth 3 -type f -printf '%p\n'; exit 1; }
+          echo "plugin=$f" >> "$GITHUB_OUTPUT"
+          ls -l "$f" && file "$f"
+
+      - name: Setup NDK r25c
+        id: setup-ndk
+        uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: r25c
+          add-to-path: true
+
+      - name: NDK compile test (load plugin at compile time)
+        run: |
+          set -euxo pipefail
+          NDK="${{ steps.setup-ndk.outputs.ndk-path }}"
+          CXX="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/clang++"
+          "$CXX" --version
+          PLUGIN="${{ steps.find_plugin.outputs.plugin }}"
+          cat > ndk_test.cpp <<'EOF'
+          #include <cstdio>
+          __attribute((__annotate__(("fla split strenc"))))
+          static void f(){ std::puts("NDK compile OK"); }
+          int main(){ f(); return 0; }
+          EOF
+          "$CXX" --target=aarch64-linux-android31 -O2 -fPIC \
+            -fpass-plugin="$PLUGIN" \
+            -c ndk_test.cpp -o ndk_test.o
+          "$CXX" --target=aarch64-linux-android31 ndk_test.o -shared -o libndk_test.so
+          file libndk_test.so || true
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ssagepass-ndk-artifacts
+          path: |
+            ${{ steps.find_plugin.outputs.plugin }}
+            libndk_test.so
+            ndk_test.cpp
+            ndk_test.o
