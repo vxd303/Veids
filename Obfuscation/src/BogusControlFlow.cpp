@@ -297,66 +297,53 @@ bool BogusControlFlowPass::containsSwiftError(BasicBlock *b) {
  * Add bogus flow to a given basic block, according to the header's
  * description
  */
-void BogusControlFlowPass::addBogusFlow(BasicBlock *basicBlock, Function &F){
-  // --- giữ nguyên phần chuẩn bị như code của bạn ---
+void BogusControlFlowPass::addBogusFlow(llvm::BasicBlock *basicBlock, llvm::Function &F) {
+  using namespace llvm;
+
+  // Điểm chia block: sau các PHI/Dbg/Lifetime
   BasicBlock::iterator i1 = basicBlock->begin();
   if (basicBlock->getFirstNonPHIOrDbgOrLifetime())
     i1 = (BasicBlock::iterator)basicBlock->getFirstNonPHIOrDbgOrLifetime();
 
+  // Trường hợp đặc biệt với probe-stack trên entry
   if (F.hasFnAttribute("probe-stack") && basicBlock->isEntryBlock()) {
-    while ((i1 != basicBlock->end()) && isa<AllocaInst>(i1)) i1++;
+    while ((i1 != basicBlock->end()) && isa<AllocaInst>(i1)) ++i1;
     if (i1 == basicBlock->end()) return;
   }
 
+  // Tách thành originalBB và tạo alteredBB clone
   BasicBlock *originalBB = basicBlock->splitBasicBlock(i1, "originalBB");
   BasicBlock *alteredBB  = createAlteredBasicBlock(originalBB, "alteredBB", &F);
 
+  // Xoá terminator mặc định để tự gắn nhánh
   if (!OnlyJunkAssemblyTemp)
     alteredBB->getTerminator()->eraseFromParent();
   basicBlock->getTerminator()->eraseFromParent();
 
-  // Điều kiện luôn-đúng (dùng i32 để tránh FP-const lặp bất thường)
+  // Điều kiện placeholder luôn-đúng (dùng i32 để tránh FP loop kỳ quặc)
   Value *LHS = ConstantInt::get(Type::getInt32Ty(F.getContext()), 1);
   Value *RHS = ConstantInt::get(Type::getInt32Ty(F.getContext()), 1);
 
-  // Helper chọn nơi chèn an toàn (Instruction*)
-  auto pickInsertBefore = [](BasicBlock *BB) -> Instruction* {
-    if (Instruction *T = BB->getTerminator()) return T;
-    // Nếu chưa có terminator, chèn trước instruction cuối nếu có
-    if (!BB->empty()) return &BB->back();
-    return nullptr; // block rỗng (hiếm); caller sẽ fallback
-  };
-
-  // ---- condition cho 'basicBlock' ----
-  ICmpInst *condition = nullptr;
-   if (Instruction *IB = pickInsertBefore(basicBlock)) {
-    condition = new ICmpInst(IB, ICmpInst::ICMP_EQ, LHS, RHS, "BCFPlaceHolderPred");
-  } else {
-    condition = new ICmpInst(*basicBlock, ICmpInst::ICMP_EQ, LHS, RHS, "BCFPlaceHolderPred");
-  }
+  // Tạo so sánh ở CUỐI basicBlock (overload BasicBlock& an toàn với LLVM 14+)
+  ICmpInst *condition = new ICmpInst(*basicBlock, ICmpInst::ICMP_EQ, LHS, RHS, "BCFPlaceHolderPred");
   needtoedit.emplace_back(condition);
 
-  // Nhánh từ basicBlock → (true) originalBB / (false) alteredBB
+  // Nhánh: true -> originalBB, false -> alteredBB
   BranchInst::Create(originalBB, alteredBB, condition, basicBlock);
 
   // alteredBB quay về originalBB
   BranchInst::Create(originalBB, alteredBB);
 
-  // --- chia originalBB để tạo cảm giác rẽ nhánh ---
-  BasicBlock::iterator i = originalBB->end();
-  BasicBlock *originalBBpart2 = originalBB->splitBasicBlock(--i, "originalBBpart2");
+  // Chia originalBB ngay trước terminator của nó
+  BasicBlock::iterator it = originalBB->end();
+  BasicBlock *originalBBpart2 = originalBB->splitBasicBlock(--it, "originalBBpart2");
   originalBB->getTerminator()->eraseFromParent();
 
-  // ---- condition2 cho 'originalBB' ----
- ICmpInst *condition = nullptr;
-  if (Instruction *IB = pickInsertBefore(basicBlock)) {
-    condition = new ICmpInst(IB, ICmpInst::ICMP_EQ, LHS, RHS, "BCFPlaceHolderPred");
-  } else {
-    condition = new ICmpInst(*basicBlock, ICmpInst::ICMP_EQ, LHS, RHS, "BCFPlaceHolderPred");
- }
+  // Điều kiện thứ 2 tại CUỐI originalBB
+  ICmpInst *condition2 = new ICmpInst(*originalBB, ICmpInst::ICMP_EQ, LHS, RHS, "BCFPlaceHolderPred");
   needtoedit.emplace_back(condition2);
 
-  // Random hoá đích nhánh để giảm pattern
+  // Ngẫu nhiên hoá đích để giảm pattern
   switch (cryptoutils->get_range(2)) {
     case 0:
       BranchInst::Create(originalBBpart2, originalBB, condition2, originalBB);
@@ -368,6 +355,7 @@ void BogusControlFlowPass::addBogusFlow(BasicBlock *basicBlock, Function &F){
       llvm_unreachable("wtf?");
   }
 }
+
 
 /* createAlteredBasicBlock
  *
