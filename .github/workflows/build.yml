@@ -39,6 +39,12 @@ jobs:
             printf '\nset(CMAKE_CXX_STANDARD 20)\n' >> "$D/CMakeLists.txt"
           fi
           echo "CMakeLists.txt configured to use C++20."
+      - name: Patch BogusControlFlow for LLVM14
+        run: |
+          F="Obfuscation/src/BogusControlFlow.cpp"
+          if [ -f "$F" ]; then
+            sed -i 's/new ICmpInst([^,]\+, \(.*\), \(.*\), \(.*\), \(.*\))/new ICmpInst(\&*\1, \2, \3, \4)/' "$F" || true
+          fi
 
       # Bước 4: Vá lỗi mã nguồn để tương thích với LLVM 14
       - name: Patch sources for LLVM 14
