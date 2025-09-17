@@ -21,20 +21,18 @@ jobs:
       - name: Install dependencies for LLVM build
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang-14 lld-14 libclang-14-dev liblld-14-dev cmake
+          sudo apt-get install -y clang-11 lld-11 libclang-11-dev liblld-11-dev cmake
 
-      - name: Patch source code for LLVM 14 compatibility
+      - name: Patch starts_with to startswith
         run: |
           sed -i 's/\.starts_with/\.startswith/g' Obfuscation/src/Utils.cpp
           sed -i 's/\.starts_with/\.startswith/g' Obfuscation/src/FunctionWrapper.cpp
-          # Patch BogusControlFlow.cpp to fix ICmpInst constructor error
-          sed -i 's/new ICmpInst(.*);/IRBuilder<>(I)->CreateICmpEQ(LHS, RHS, "BCFPlaceHolderPred");/g' Obfuscation/src/BogusControlFlow.cpp
           
       - name: Configure and build
         run: |
           mkdir build
           cd build
-          cmake -DLLVM_DIR=/usr/lib/llvm-14/cmake -DLT_LLVM_INSTALL_DIR=/usr/lib/llvm-14 ../Obfuscation
+          cmake -DLLVM_DIR=/usr/lib/llvm-11/cmake -DLT_LLVM_INSTALL_DIR=/usr/lib/llvm-11 ../Obfuscation
           make
 
       - name: Locate plugin
