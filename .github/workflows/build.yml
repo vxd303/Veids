@@ -21,6 +21,14 @@ jobs:
       - name: Install dependencies for LLVM build
         run: |
           sudo apt-get update
+          sudo apt-get install -y lsb-release wget software-properties-common gnupg
+          
+          # Add LLVM repository
+          wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | sudo gpg --dearmor -o /etc/apt/keyrings/llvm-org.gpg
+          echo "deb [signed-by=/etc/apt/keyrings/llvm-org.gpg] http://apt.llvm.org/focal/ llvm-toolchain-focal-11 main" | sudo tee /etc/apt/sources.list.d/llvm.list
+          
+          # Install LLVM 11
+          sudo apt-get update
           sudo apt-get install -y clang-11 lld-11 libclang-11-dev liblld-11-dev cmake
 
       - name: Patch starts_with to startswith
