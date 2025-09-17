@@ -329,10 +329,9 @@ void BogusControlFlowPass::addBogusFlow(BasicBlock *basicBlock, Function &F){
 
   // ---- condition cho 'basicBlock' ----
   ICmpInst *condition = nullptr;
-  if (Instruction *IB = pickInsertBefore(basicBlock)) {
+   if (Instruction *IB = pickInsertBefore(basicBlock)) {
     condition = new ICmpInst(IB, ICmpInst::ICMP_EQ, LHS, RHS, "BCFPlaceHolderPred");
   } else {
-    // fallback: insert-at-end overload (ổn với LLVM 14+; vẫn có ở các bản mới)
     condition = new ICmpInst(*basicBlock, ICmpInst::ICMP_EQ, LHS, RHS, "BCFPlaceHolderPred");
   }
   needtoedit.emplace_back(condition);
@@ -349,12 +348,12 @@ void BogusControlFlowPass::addBogusFlow(BasicBlock *basicBlock, Function &F){
   originalBB->getTerminator()->eraseFromParent();
 
   // ---- condition2 cho 'originalBB' ----
-  ICmpInst *condition2 = nullptr;
-  if (Instruction *IB2 = pickInsertBefore(originalBB)) {
-    condition2 = new ICmpInst(IB2, ICmpInst::ICMP_EQ, LHS, RHS, "BCFPlaceHolderPred");
+ ICmpInst *condition = nullptr;
+  if (Instruction *IB = pickInsertBefore(basicBlock)) {
+    condition = new ICmpInst(IB, ICmpInst::ICMP_EQ, LHS, RHS, "BCFPlaceHolderPred");
   } else {
-    condition2 = new ICmpInst(*originalBB, ICmpInst::ICMP_EQ, LHS, RHS, "BCFPlaceHolderPred");
-  }
+    condition = new ICmpInst(*basicBlock, ICmpInst::ICMP_EQ, LHS, RHS, "BCFPlaceHolderPred");
+ }
   needtoedit.emplace_back(condition2);
 
   // Random hoá đích nhánh để giảm pattern
