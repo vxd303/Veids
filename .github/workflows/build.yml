@@ -26,7 +26,8 @@ jobs:
       - name: Patch source code for LLVM 14 compatibility
         run: |
           sed -i 's/\.starts_with/\.startswith/g' Obfuscation/src/Utils.cpp
-
+          sed -i 's/\.starts_with/\.startswith/g' Obfuscation/src/FunctionWrapper.cpp
+          
       - name: Configure and build
         run: |
           mkdir build
