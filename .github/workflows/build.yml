@@ -57,13 +57,6 @@ jobs:
             perl -0777 -pe 's/DemotePHIToStack\s*\(\s*([^\),]+)\s*,\s*insertionPoint\s*\)/DemotePHIToStack(\1, \&*insertionPoint)/g' -i "$D/src/VMFlatten.cpp" || true
             perl -0777 -pe 's/DemoteRegToStack\s*\(\s*([^\),]+)\s*,\s*false\s*,\s*insertionPoint\s*\)/DemoteRegToStack(\1, false, \&*insertionPoint)/g' -i "$D/src/VMFlatten.cpp" || true
           fi
-          F_BCF="$D/src/BogusControlFlow.cpp"
-          if [ -f "$F_BCF" ]; then
-            sed -i 's/InsertBefore->getIterator()/InsertBefore/g' "$F_BCF"
-            perl -0777 -pe 's/getFirstNonPHIOrDbgOrLifetime\(\)\s*(==|!=)/getFirstNonPHIOrDbgOrLifetime()->getIterator() $1/g' -i "$F_BCF"
-            sed -i 's/\<getFirstNonPHIOrDbgOrLifetime()\s*;/getFirstNonPHIOrDbgOrLifetime()->getIterator();/g' "$F_BCF"
-            perl -i -0777 -pe 's/new ICmpInst\(\s*I,\s*CmpInst::ICMP_EQ,\s*LHS,\s*RHS,\s*"BCFPlaceHolderPred"\s*\);/llvm::IRBuilder<>(I)->CreateICmpEQ(LHS, RHS, "BCFPlaceHolderPred");/g' "$F_BCF"
-          fi
 
       # !! BƯỚC MỚI ĐƯỢC THÊM VÀO ĐÂY !!
       # Vá lỗi tên phương thức của llvm::StringRef trong Utils.cpp
