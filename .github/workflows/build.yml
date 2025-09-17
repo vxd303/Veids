@@ -16,22 +16,18 @@ jobs:
       - name: Checkout dev branch
         uses: actions/checkout@v4
         with:
-          ref: 'dev' # Thêm dòng này để chỉ định checkout nhánh 'dev'
+          ref: 'dev'
 
       - name: Install dependencies for LLVM build
         run: |
           sudo apt-get update
           sudo apt-get install -y clang-14 lld-14 libclang-14-dev liblld-14-dev cmake
 
-      - name: Configure CMake
+      - name: Configure and build
         run: |
           mkdir build
           cd build
           cmake ..
-
-      - name: Build SsagePass
-        run: |
-          cd build
           make
 
       - name: Locate plugin
